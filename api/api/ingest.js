@@ -3,12 +3,18 @@ import formidable from "formidable";
 import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
 
-// Desactiva el parser por defecto de Vercel (porque usamos formidable)
 export const config = {
   api: {
     bodyParser: false,
   },
 };
+
+// 🔥 Función para habilitar CORS
+function setCORS(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -20,12 +26,15 @@ const supabase = createClient(
 );
 
 export default async function handler(req, res) {
+  // ✅ CORS habilitado
+  setCORS(res);
+  if (req.method === "OPTIONS") return res.status(200).end();
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    // Parsear el archivo enviado desde Lovable
     const form = formidable({});
     const [fields, files] = await form.parse(req);
     const file = files.file?.[0];
@@ -34,11 +43,9 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "No file uploaded" });
     }
 
-    // Leer el contenido del archivo
     const fileBuffer = fs.readFileSync(file.filepath);
     const text = fileBuffer.toString("utf8");
 
-    // Generar embeddings con OpenAI
     const embeddingResponse = await openai.embeddings.create({
       model: "text-embedding-3-large",
       input: text,
@@ -46,7 +53,6 @@ export default async function handler(req, res) {
 
     const embedding = embeddingResponse.data[0].embedding;
 
-    // Guardar en Supabase
     const { error } = await supabase.from("knowledge_base").insert([
       {
         content: text,
@@ -59,6 +65,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ message: "✅ Documento procesado correctamente" });
   } catch (error) {
     console.error("❌ Error en /api/ingest:", error);
-    return res.status(500).json({ error: "Internal Server Error" });
+    return res.status(500).json({ error: error.message || "Internal Server Error" });
   }
 }
