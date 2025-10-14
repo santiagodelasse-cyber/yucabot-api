@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import formidable from "formidable";
 import fs from "fs/promises";
 import path from "path";
-import pdf from "pdf-parse";
+import pdf from "pdf-parse-fixed";
 import mammoth from "mammoth";
 import { createClient } from "@supabase/supabase-js";
 
