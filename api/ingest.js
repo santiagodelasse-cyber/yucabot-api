@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import formidable from "formidable";
 import fs from "fs";
 import mammoth from "mammoth";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 import { createClient } from "@supabase/supabase-js";
 
 // 🚀 Configuración API (sin bodyParser)
