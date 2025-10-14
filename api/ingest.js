@@ -1,11 +1,11 @@
 import formidable from "formidable";
 import fs from "fs";
-import pdfParse from "pdf-parse";
+import pdfParse from "pdf-parse-fixed-promise";
 import mammoth from "mammoth";
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 
-// 🔧 evita que Vercel intente parsear el body
+// 🔧 Evita que Vercel intente parsear el body
 export const config = { api: { bodyParser: false } };
 
 // 🧠 Inicializar clientes
@@ -73,7 +73,7 @@ export default async function handler(req, res) {
 
     console.log("🚀 Saving to Supabase...");
     const { error } = await supabase.from("knowledge_base").insert({
-      content: textContent.slice(0, 5000), // limitar tamaño
+      content: textContent.slice(0, 5000),
       embedding,
       created_at: new Date(),
     });
