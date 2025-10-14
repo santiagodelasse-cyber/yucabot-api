@@ -5,7 +5,8 @@ import path from "path";
 import mammoth from "mammoth";
 import { createClient } from "@supabase/supabase-js";
 // 👇 este import usa la versión que sí funciona en serverless
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import "pdfjs-dist/build/pdf.worker.mjs";
 
 export const config = {
   api: { bodyParser: false },
@@ -36,7 +37,7 @@ export default async function handler(req, res) {
     if (ext === ".txt") {
       textContent = buffer.toString("utf8");
     } else if (ext === ".pdf") {
-      const pdf = await getDocument({ data: buffer }).promise;
+     const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
       let text = "";
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
