@@ -1,94 +1,81 @@
 import OpenAI from "openai";
 import formidable from "formidable";
-import fs from "fs";
+import fs from "fs/promises";
 import path from "path";
-import pdfParse from "pdf-parse";
+import pdf from "pdf-parse";
 import mammoth from "mammoth";
 import { createClient } from "@supabase/supabase-js";
 
-// Evita que Vercel intente parsear el body automáticamente
 export const config = {
-  api: {
-    bodyParser: false,
-  },
+  api: { bodyParser: false },
 };
 
-// Inicializa OpenAI y Supabase
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
-// 📦 Función principal
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   console.log("📩 Ingest request received");
 
   try {
-    // 📁 Procesar archivo subido con formidable
+    // 🧾 Parsear archivo subido
     const form = formidable({ multiples: false });
     const [fields, files] = await form.parse(req);
     const file = files.file?.[0];
+    if (!file) return res.status(400).json({ error: "No file uploaded" });
 
-    if (!file) {
-      return res.status(400).json({ error: "No file uploaded" });
-    }
-
-    const ext = path.extname(file.originalFilename).toLowerCase();
+    const filePath = file.filepath;
+    const ext = path.extname(file.originalFilename || "").toLowerCase();
     let textContent = "";
 
-    // 📖 Detectar tipo de archivo
+    console.log(`📄 Processing file: ${file.originalFilename} (${ext})`);
+
+    // 📘 Leer archivo en Buffer (sin rutas relativas)
+    const buffer = await fs.readFile(filePath);
+
     if (ext === ".txt") {
-      textContent = fs.readFileSync(file.filepath, "utf8");
+      textContent = buffer.toString("utf8");
     } else if (ext === ".pdf") {
-      const dataBuffer = fs.readFileSync(file.filepath);
-      const pdfData = await pdfParse(dataBuffer);
+      const pdfData = await pdf(buffer); // ✅ ahora pasa el buffer directo, sin rutas
       textContent = pdfData.text;
     } else if (ext === ".docx") {
-      const dataBuffer = fs.readFileSync(file.filepath);
-      const docResult = await mammoth.extractRawText({ buffer: dataBuffer });
-      textContent = docResult.value;
+      const result = await mammoth.extractRawText({ buffer });
+      textContent = result.value;
     } else {
-      return res.status(400).json({ error: "Unsupported file format" });
+      return res.status(400).json({ error: "Unsupported file type" });
     }
 
-    if (!textContent || textContent.trim().length < 5) {
-      return res.status(400).json({ error: "File content is empty or invalid" });
+    if (!textContent.trim()) {
+      return res.status(400).json({ error: "Empty or invalid file content" });
     }
 
-    console.log("🧠 Creating embedding...");
+    console.log("🧠 Generating embedding...");
     const embeddingResponse = await openai.embeddings.create({
       model: "text-embedding-3-small",
-      input: textContent.slice(0, 8000), // límite de tokens
+      input: textContent.slice(0, 8000),
     });
 
     const embedding = embeddingResponse.data[0].embedding;
 
-    console.log("🚀 Inserting into Supabase...");
+    console.log("🚀 Saving to Supabase...");
     const { error } = await supabase.from("knowledge_base").insert([
       {
-        content: textContent.slice(0, 20000), // por seguridad
+        content: textContent.slice(0, 20000),
         embedding,
       },
     ]);
 
     if (error) {
       console.error("❌ Supabase insert error:", error);
-      return res.status(500).json({ error: "Failed to insert into Supabase" });
+      return res.status(500).json({ error: "Failed to save to Supabase" });
     }
 
-    console.log("✅ File processed successfully!");
+    console.log("✅ Upload complete!");
     res.status(200).json({ message: "File uploaded and processed successfully" });
 
   } catch (error) {
-    console.error("💥 Ingest error:", error);
-    res.status(500).json({ error: "Internal server error", details: error.message });
+    console.error("💥 Fatal ingest error:", error);
+    res.status(500).json({ error: "Internal Server Error", details: error.message });
   }
 }
