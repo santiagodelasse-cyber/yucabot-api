@@ -1,14 +1,12 @@
 import formidable from "formidable";
 import fs from "fs";
-import pdfParse from "pdf-parse-fixed-promise";
 import mammoth from "mammoth";
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
+import PDFParser from "pdf2json"; // 🔧 librería ligera, sin canvas
 
-// 🔧 Evita que Vercel intente parsear el body
 export const config = { api: { bodyParser: false } };
 
-// 🧠 Inicializar clientes
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -17,6 +15,24 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
+
+async function extractTextFromPDF(filePath) {
+  return new Promise((resolve, reject) => {
+    const pdfParser = new PDFParser();
+
+    pdfParser.on("pdfParser_dataError", (err) => reject(err.parserError));
+    pdfParser.on("pdfParser_dataReady", (pdfData) => {
+      const text = pdfData.Pages.map((page) =>
+        page.Texts.map((t) =>
+          decodeURIComponent(t.R[0].T)
+        ).join(" ")
+      ).join("\n");
+      resolve(text);
+    });
+
+    pdfParser.loadPDF(filePath);
+  });
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -29,10 +45,7 @@ export default async function handler(req, res) {
   const [fields, files] = await form.parse(req);
   const file = files.file?.[0];
 
-  if (!file) {
-    console.error("❌ No file uploaded");
-    return res.status(400).json({ error: "No file uploaded" });
-  }
+  if (!file) return res.status(400).json({ error: "No file uploaded" });
 
   const filePath = file.filepath;
   const fileType = file.mimetype;
@@ -41,11 +54,8 @@ export default async function handler(req, res) {
   let textContent = "";
 
   try {
-    // 📘 Tipos de archivo admitidos
     if (fileType === "application/pdf") {
-      const dataBuffer = fs.readFileSync(filePath);
-      const pdfData = await pdfParse(dataBuffer);
-      textContent = pdfData.text;
+      textContent = await extractTextFromPDF(filePath);
     } else if (
       fileType ===
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -78,10 +88,7 @@ export default async function handler(req, res) {
       created_at: new Date(),
     });
 
-    if (error) {
-      console.error("❌ Supabase insert error:", error);
-      throw new Error("Failed to insert into Supabase");
-    }
+    if (error) throw error;
 
     console.log("✅ Documento procesado correctamente");
     return res.status(200).json({ success: true });
@@ -90,7 +97,7 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: error.message });
   } finally {
     try {
-      fs.unlinkSync(filePath); // limpia archivo temporal
+      fs.unlinkSync(filePath);
     } catch (_) {}
   }
 }
