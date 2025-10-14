@@ -1,107 +1,96 @@
-import OpenAI from "openai";
 import formidable from "formidable";
 import fs from "fs";
+import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
-import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 import { createClient } from "@supabase/supabase-js";
+import OpenAI from "openai";
 
-// 🚀 Configuración API (sin bodyParser)
+// 🔧 evita que Vercel intente parsear el body
 export const config = { api: { bodyParser: false } };
 
-// 🧠 Cliente Supabase
+// 🧠 Inicializar clientes
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ⚙️ CORS middleware
-function allowCors(fn) {
-  return async (req, res) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    if (req.method === "OPTIONS") return res.status(200).end();
-    return await fn(req, res);
-  };
-}
-
-// 🔍 Función para extraer texto
-async function extractText(filePath, mimeType) {
-  if (mimeType === "application/pdf") {
-    const data = new Uint8Array(fs.readFileSync(filePath));
-    const pdf = await pdfjsLib.getDocument({ data }).promise;
-    let text = "";
-
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map((item) => item.str).join(" ") + "\n";
-    }
-    return text;
-  }
-
-  if (mimeType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-    const result = await mammoth.extractRawText({ path: filePath });
-    return result.value;
-  }
-
-  if (mimeType === "text/plain") {
-    return fs.readFileSync(filePath, "utf8");
-  }
-
-  throw new Error("Tipo de archivo no soportado");
-}
-
-// 💾 Guardar texto y embedding en Supabase
-async function saveToSupabase(text) {
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const embedding = await openai.embeddings.create({
-    model: "text-embedding-3-small",
-    input: text.slice(0, 8000),
-  });
-
-  const { error } = await supabase.from("knowledge_base").insert({
-    content: text,
-    embedding: embedding.data[0].embedding,
-  });
-
-  if (error) throw error;
-}
-
-// 📥 Endpoint principal
-async function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Método no permitido" });
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   console.log("📩 Ingest request received");
 
-  const form = formidable({ multiples: false, keepExtensions: true });
+  const form = formidable({});
+  const [fields, files] = await form.parse(req);
+  const file = files.file?.[0];
 
-  form.parse(req, async (err, fields, files) => {
-    if (err || !files.file) {
-      console.error("❌ Error al procesar el archivo:", err);
-      return res.status(400).json({ error: "Error al procesar el archivo" });
+  if (!file) {
+    console.error("❌ No file uploaded");
+    return res.status(400).json({ error: "No file uploaded" });
+  }
+
+  const filePath = file.filepath;
+  const fileType = file.mimetype;
+  console.log(`📄 Processing file: ${file.originalFilename} (${fileType})`);
+
+  let textContent = "";
+
+  try {
+    // 📘 Tipos de archivo admitidos
+    if (fileType === "application/pdf") {
+      const dataBuffer = fs.readFileSync(filePath);
+      const pdfData = await pdfParse(dataBuffer);
+      textContent = pdfData.text;
+    } else if (
+      fileType ===
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ) {
+      const dataBuffer = fs.readFileSync(filePath);
+      const result = await mammoth.extractRawText({ buffer: dataBuffer });
+      textContent = result.value;
+    } else if (fileType === "text/plain") {
+      textContent = fs.readFileSync(filePath, "utf8");
+    } else {
+      throw new Error(`Unsupported file type: ${fileType}`);
     }
 
-    const file = files.file[0];
-    const filePath = file.filepath;
-    const mimeType = file.mimetype;
+    if (!textContent.trim()) {
+      throw new Error("File appears to be empty or unreadable.");
+    }
 
-    console.log(`📄 Procesando archivo: ${file.originalFilename} (${mimeType})`);
+    console.log("🧠 Generating embedding...");
+    const embeddingResponse = await openai.embeddings.create({
+      model: "text-embedding-3-small",
+      input: textContent.slice(0, 8000),
+    });
 
+    const [{ embedding }] = embeddingResponse.data;
+
+    console.log("🚀 Saving to Supabase...");
+    const { error } = await supabase.from("knowledge_base").insert({
+      content: textContent.slice(0, 5000), // limitar tamaño
+      embedding,
+      created_at: new Date(),
+    });
+
+    if (error) {
+      console.error("❌ Supabase insert error:", error);
+      throw new Error("Failed to insert into Supabase");
+    }
+
+    console.log("✅ Documento procesado correctamente");
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("💥 Fatal ingest error:", error);
+    return res.status(500).json({ error: error.message });
+  } finally {
     try {
-      const text = await extractText(filePath, mimeType);
-      await saveToSupabase(text);
-      console.log("✅ Documento procesado correctamente");
-      res.status(200).json({ message: "Documento procesado correctamente" });
-    } catch (error) {
-      console.error("💥 Error fatal en ingest:", error);
-      res.status(500).json({ error: error.message });
-    } finally {
-      fs.unlink(filePath, () => {});
-    }
-  });
+      fs.unlinkSync(filePath); // limpia archivo temporal
+    } catch (_) {}
+  }
 }
-
-export default allowCors(handler);
