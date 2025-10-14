@@ -2,9 +2,9 @@ import OpenAI from "openai";
 import formidable from "formidable";
 import fs from "fs/promises";
 import path from "path";
-import pdf from "pdf-parse-fixed";
 import mammoth from "mammoth";
 import { createClient } from "@supabase/supabase-js";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 
 export const config = {
   api: { bodyParser: false },
@@ -19,7 +19,6 @@ export default async function handler(req, res) {
   console.log("📩 Ingest request received");
 
   try {
-    // 🧾 Parsear archivo subido
     const form = formidable({ multiples: false });
     const [fields, files] = await form.parse(req);
     const file = files.file?.[0];
@@ -31,14 +30,21 @@ export default async function handler(req, res) {
 
     console.log(`📄 Processing file: ${file.originalFilename} (${ext})`);
 
-    // 📘 Leer archivo en Buffer (sin rutas relativas)
     const buffer = await fs.readFile(filePath);
 
+    // Procesar por tipo de archivo
     if (ext === ".txt") {
       textContent = buffer.toString("utf8");
     } else if (ext === ".pdf") {
-      const pdfData = await pdf(buffer); // ✅ ahora pasa el buffer directo, sin rutas
-      textContent = pdfData.text;
+      const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+      let text = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const strings = content.items.map((item) => item.str);
+        text += strings.join(" ") + "\n";
+      }
+      textContent = text;
     } else if (ext === ".docx") {
       const result = await mammoth.extractRawText({ buffer });
       textContent = result.value;
