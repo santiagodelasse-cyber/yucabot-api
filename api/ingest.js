@@ -4,7 +4,8 @@ import fs from "fs/promises";
 import path from "path";
 import mammoth from "mammoth";
 import { createClient } from "@supabase/supabase-js";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
+// 👇 este import usa la versión que sí funciona en serverless
+import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 export const config = {
   api: { bodyParser: false },
@@ -32,17 +33,15 @@ export default async function handler(req, res) {
 
     const buffer = await fs.readFile(filePath);
 
-    // Procesar por tipo de archivo
     if (ext === ".txt") {
       textContent = buffer.toString("utf8");
     } else if (ext === ".pdf") {
-      const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+      const pdf = await getDocument({ data: buffer }).promise;
       let text = "";
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
-        const strings = content.items.map((item) => item.str);
-        text += strings.join(" ") + "\n";
+        text += content.items.map((item) => item.str).join(" ") + "\n";
       }
       textContent = text;
     } else if (ext === ".docx") {
@@ -66,10 +65,7 @@ export default async function handler(req, res) {
 
     console.log("🚀 Saving to Supabase...");
     const { error } = await supabase.from("knowledge_base").insert([
-      {
-        content: textContent.slice(0, 20000),
-        embedding,
-      },
+      { content: textContent.slice(0, 20000), embedding },
     ]);
 
     if (error) {
@@ -79,7 +75,6 @@ export default async function handler(req, res) {
 
     console.log("✅ Upload complete!");
     res.status(200).json({ message: "File uploaded and processed successfully" });
-
   } catch (error) {
     console.error("💥 Fatal ingest error:", error);
     res.status(500).json({ error: "Internal Server Error", details: error.message });
