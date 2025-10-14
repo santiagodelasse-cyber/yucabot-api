@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 
 export const config = { api: { bodyParser: false } };
 
+// CORS robusto
 const allowCors = (fn) => async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
@@ -15,12 +16,20 @@ const allowCors = (fn) => async (req, res) => {
 
 const handler = async (req, res) => {
   try {
+    if (req.method !== "POST") {
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+
     console.log("📩 Ingest request received");
 
     const form = formidable({});
     const [fields, files] = await form.parse(req);
     const file = files.file?.[0];
-    if (!file) return res.status(400).json({ error: "No file uploaded" });
+
+    if (!file) {
+      console.error("❌ No file uploaded");
+      return res.status(400).json({ error: "No file uploaded" });
+    }
 
     const fileBuffer = fs.readFileSync(file.filepath);
     const text = fileBuffer.toString("utf8");
@@ -47,14 +56,14 @@ const handler = async (req, res) => {
 
     if (error) {
       console.error("❌ Supabase insert error:", error);
-      return res.status(500).json({ error: error.message });
+      return res.status(500).json({ error: error.message || "Supabase insert error" });
     }
 
     console.log("✅ Insert success:", data);
     return res.status(200).json({ message: "✅ Documento procesado correctamente" });
   } catch (error) {
     console.error("💥 Fatal error in /api/ingest:", error);
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message || "Internal Server Error" });
   }
 };
 
