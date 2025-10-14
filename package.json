@@ -5,15 +5,13 @@
   "type": "module",
   "scripts": {
     "start": "node api/ingest.js",
-    "vercel-build": "npm install pdfjs-dist@3.4.120 && echo 'Build complete'"
+    "vercel-build": "echo 'Build complete'"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.43.4",
     "formidable": "^3.5.1",
     "openai": "^4.47.0",
     "pdf-parse": "^1.1.1",
-    "mammoth": "^1.6.0",
-    "pdfjs-dist": "3.4.120",
-    "canvas": "^2.11.2"
+    "mammoth": "^1.6.0"
   }
 }
