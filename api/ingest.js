@@ -1,31 +1,22 @@
 import formidable from "formidable";
 import fs from "fs";
 import mammoth from "mammoth";
+import fetch from "node-fetch";
 import { createClient } from "@supabase/supabase-js";
-import OpenAI from "openai";
-import PDFParser from "pdf2json";
-
-// 🚀 Soporte Hugging Face opcional
-const useHF = process.env.EMBEDDINGS_PROVIDER === "hf";
+import PDFParser from "pdf2json"; // Ligero y sin dependencias de canvas
 
 export const config = { api: { bodyParser: false } };
 
-// ✅ Inicializa OpenAI si hay API key
-const openai = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null;
-
-// ✅ Inicializa Supabase
+// Inicializar Supabase
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ✅ Función para extraer texto de PDF
+// --- Función para extraer texto de PDF ---
 async function extractTextFromPDF(filePath) {
   return new Promise((resolve, reject) => {
     const pdfParser = new PDFParser();
-
     pdfParser.on("pdfParser_dataError", (err) => reject(err.parserError));
     pdfParser.on("pdfParser_dataReady", (pdfData) => {
       const text = pdfData.Pages.map((page) =>
@@ -33,48 +24,40 @@ async function extractTextFromPDF(filePath) {
       ).join("\n");
       resolve(text);
     });
-
     pdfParser.loadPDF(filePath);
   });
 }
 
-// ✅ Función para generar embedding (OpenAI o Hugging Face)
+// --- Generar embedding con Hugging Face ---
 async function generateEmbedding(text) {
-  if (useHF) {
-    console.log("⚙️ Usando Hugging Face para embeddings...");
-    const model = "sentence-transformers/all-MiniLM-L6-v2";
-    const res = await fetch(
-      `https://api-inference.huggingface.co/pipeline/feature-extraction/${model}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.HF_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ inputs: text.slice(0, 8000) }),
-      }
-    );
-    if (!res.ok) {
-      throw new Error(`HF error: ${res.status} ${await res.text()}`);
+  const HF_API_KEY = process.env.HF_API_KEY;
+  if (!HF_API_KEY) throw new Error("HF_API_KEY no está configurada");
+
+  const response = await fetch(
+    "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2",
+    {
+      headers: {
+        Authorization: `Bearer ${HF_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+      body: JSON.stringify({ inputs: text }),
     }
-    const data = await res.json();
-    const vec = Array.isArray(data[0]) ? data[0] : data;
-    return vec.map(Number);
-  } else {
-    console.log("⚙️ Usando OpenAI para embeddings...");
-    const embeddingResponse = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: text.slice(0, 8000),
-    });
-    return embeddingResponse.data[0].embedding;
+  );
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Error de Hugging Face: ${errText}`);
   }
+
+  const data = await response.json();
+  return data[0]; // vector de embedding
 }
 
-// ✅ Función principal
+// --- Handler principal ---
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
+  if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
-  }
 
   console.log("📩 Ingest request received");
 
@@ -86,13 +69,12 @@ export default async function handler(req, res) {
 
   const filePath = file.filepath;
   const fileType = file.mimetype;
-  const fileName = file.originalFilename;
-  console.log(`📄 Processing file: ${fileName} (${fileType})`);
+  console.log(`📄 Processing file: ${file.originalFilename} (${fileType})`);
 
   let textContent = "";
 
   try {
-    // ✅ 1. Leer contenido según tipo
+    // Extraer texto según el tipo de archivo
     if (fileType === "application/pdf") {
       textContent = await extractTextFromPDF(filePath);
     } else if (
@@ -109,42 +91,22 @@ export default async function handler(req, res) {
     }
 
     if (!textContent.trim()) {
-      throw new Error("File appears to be empty or unreadable.");
+      throw new Error("El archivo parece vacío o no se pudo leer.");
     }
 
-    // ✅ 2. Generar embedding
     console.log("🧠 Generating embedding...");
-    const embedding = await generateEmbedding(textContent);
+    console.log("⚙️ Usando Hugging Face para embeddings...");
 
-    // ✅ 3. Guardar en Supabase
+    const embedding = await generateEmbedding(textContent.slice(0, 2000));
+
     console.log("🚀 Saving to Supabase...");
     const { error } = await supabase.from("knowledge_base").insert({
       content: textContent.slice(0, 5000),
       embedding,
       created_at: new Date(),
     });
-    if (error) throw error;
 
-    // ✅ 4. Disparar webhook de n8n
-    try {
-      const webhookUrl = process.env.N8N_WEBHOOK_URL;
-      if (webhookUrl) {
-        await fetch(webhookUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            event: "ingest_completed",
-            filename: fileName,
-            timestamp: new Date().toISOString(),
-          }),
-        });
-        console.log("🔔 Webhook enviado a n8n");
-      } else {
-        console.warn("⚠️ N8N_WEBHOOK_URL no configurada en Vercel");
-      }
-    } catch (err) {
-      console.warn("No se pudo notificar a n8n:", err.message);
-    }
+    if (error) throw error;
 
     console.log("✅ Documento procesado correctamente");
     return res.status(200).json({ success: true });
