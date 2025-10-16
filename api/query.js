@@ -7,7 +7,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ✅ Función para generar embeddings desde Hugging Face
+// ✅ Generar embedding robusto desde Hugging Face
 async function generateEmbedding(text) {
   const response = await fetch(
     "https://api-inference.huggingface.co/models/mixedbread-ai/mxbai-embed-large-v1",
@@ -28,29 +28,42 @@ async function generateEmbedding(text) {
 
   const result = await response.json();
 
-  // 🔧 Asegurar que el formato sea un arreglo válido
-  let embedding;
+  // ⚙️ Formato flexible: detectar vector válido sin importar estructura
+  let embedding = null;
+
   if (Array.isArray(result)) {
-    embedding = result[0]?.embedding || result[0];
-  } else if (result?.embedding) {
+    // Caso 1: [{ embedding: [ ... ] }]
+    if (result[0]?.embedding && Array.isArray(result[0].embedding)) {
+      embedding = result[0].embedding;
+    }
+    // Caso 2: [ [ ... ] ]
+    else if (Array.isArray(result[0])) {
+      embedding = result[0];
+    }
+    // Caso 3: [number, number, number...]
+    else if (typeof result[0] === "number") {
+      embedding = result;
+    }
+  } else if (Array.isArray(result.embedding)) {
+    // Caso 4: { embedding: [ ... ] }
     embedding = result.embedding;
-  } else {
-    throw new Error("No se pudo extraer el embedding del resultado de Hugging Face.");
   }
 
-  if (!Array.isArray(embedding)) {
-    throw new Error("El embedding recibido no es un arreglo válido.");
+  if (!embedding || !Array.isArray(embedding)) {
+    console.error("❌ Resultado inesperado de Hugging Face:", result);
+    throw new Error("No se pudo extraer un embedding válido del resultado de Hugging Face.");
   }
 
+  console.log(`✅ Embedding generado con ${embedding.length} dimensiones.`);
   return embedding;
 }
 
-// ✅ Función para generar respuesta natural tipo ChatGPT
+// ✅ Generar respuesta natural tipo ChatGPT
 async function generateAnswer(context, question) {
   const prompt = `
-  Eres un asistente inteligente llamado YucaBot. Usa la siguiente información de contexto 
-  para responder en español a la pregunta del usuario. 
-  Si la respuesta no está claramente en el texto, di: "No encontré esa información en los documentos."
+  Eres YucaBot, un asistente especializado en fitness boutique (Pilates, Yoga, Barre, Functional Training).
+  Usa la siguiente información del documento para responder en español.
+  Si no encuentras la respuesta exacta, di: "No encontré esa información en los documentos."
 
   CONTEXTO:
   ${context}
