@@ -28,7 +28,7 @@ async function extractTextFromPDF(filePath) {
 
 // --- Generar embedding usando Hugging Face ---
 async function generateEmbedding(text) {
-  const HF_API_KEY = process.env.HF_API_KEY;
+  const HF_API_KEY = process.env.HUGGINGFACE_API_KEY;
   if (!HF_API_KEY) throw new Error("HF_API_KEY no está configurada");
 
   const model = "mixedbread-ai/mxbai-embed-large-v1"; // ✅ modelo correcto de embeddings
