@@ -9,18 +9,17 @@ const supabase = createClient(
 const HF_API_KEY = process.env.HUGGINGFACE_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-// === CORS UNIVERSAL ===
+// === CORS ===
 function setCORS(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-// === FUNCIÓN: Generar embedding ===
+// === EMBEDDING ===
 async function generateEmbedding(text) {
   if (!text || text.trim() === "") throw new Error("Texto vacío para embedding.");
 
-  // Preferencia Hugging Face
   if (HF_API_KEY) {
     const model = "mixedbread-ai/mxbai-embed-large-v1";
     const response = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
@@ -46,7 +45,6 @@ async function generateEmbedding(text) {
     throw new Error("Respuesta inválida de HuggingFace.");
   }
 
-  // Fallback OpenAI
   if (OPENAI_API_KEY) {
     const response = await fetch("https://api.openai.com/v1/embeddings", {
       method: "POST",
@@ -63,22 +61,22 @@ async function generateEmbedding(text) {
     return data.data[0].embedding;
   }
 
-  throw new Error("No se encontró API Key de embeddings (HF o OpenAI).");
+  throw new Error("No hay API Key configurada para embeddings.");
 }
 
-// === FUNCIÓN: Generar respuesta generativa ===
+// === RESPUESTA GENERATIVA ===
 async function generateAnswer(context, question) {
   const prompt = `
-Eres YucaBot, un asistente virtual especializado en estudios fitness, yoga, pilates y bienestar.
-Usa la siguiente información de contexto (extraída de documentos del cliente) para responder de forma natural, concisa y útil.
+Eres YucaBot, un asistente virtual para estudios de fitness, yoga y bienestar.
+Usa el siguiente contexto (extraído de documentos reales) para responder de forma cálida y profesional.
 
 Contexto:
 ${context}
 
-Pregunta del usuario:
+Pregunta:
 ${question}
 
-Responde en español, con tono cálido y profesional.
+Responde en español con claridad y precisión.
 `;
 
   if (OPENAI_API_KEY) {
@@ -95,10 +93,9 @@ Responde en español, con tono cálido y profesional.
       }),
     });
     const data = await response.json();
-    return data.choices?.[0]?.message?.content || "No se encontró respuesta.";
+    return data.choices?.[0]?.message?.content || "No encontré una respuesta relevante.";
   }
 
-  // Fallback Hugging Face (modelo de texto generativo)
   if (HF_API_KEY) {
     const model = "mistralai/Mixtral-8x7B-Instruct-v0.1";
     const response = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
@@ -113,13 +110,16 @@ Responde en español, con tono cálido y profesional.
       }),
     });
     const data = await response.json();
-    return data[0]?.generated_text?.split("Respuesta:")[1]?.trim() || "No encontré respuesta.";
+    return (
+      data[0]?.generated_text?.split("Respuesta:")[1]?.trim() ||
+      "No encontré una respuesta relevante."
+    );
   }
 
-  throw new Error("No se encontró API Key para generación de texto.");
+  throw new Error("No hay API Key configurada para generación de texto.");
 }
 
-// === HANDLER PRINCIPAL ===
+// === HANDLER ===
 export default async function handler(req, res) {
   setCORS(res);
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -131,25 +131,18 @@ export default async function handler(req, res) {
     const { query } = req.body;
     if (!query || query.trim() === "") throw new Error("Consulta vacía.");
 
-    console.log("🔹 Generando embedding...");
     const queryEmbedding = await generateEmbedding(query);
 
-    console.log("🔹 Buscando coincidencias en Supabase...");
     const { data: matches, error } = await supabase.rpc("match_documents", {
       query_embedding: queryEmbedding,
-      match_threshold: 0.78,
+      match_threshold: 0.75,
       match_count: 5,
     });
 
     if (error) throw error;
 
-    const contextText = matches
-      ?.map((m) => m.content)
-      .join("\n\n")
-      .slice(0, 4000);
-
-    console.log("🔹 Generando respuesta con IA...");
-    const answer = await generateAnswer(contextText, query);
+    const context = matches?.map((m) => m.content).join("\n\n").slice(0, 4000);
+    const answer = await generateAnswer(context, query);
 
     res.status(200).json({
       success: true,
@@ -158,9 +151,6 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error("💥 Error en query:", err);
-    res.status(500).json({
-      success: false,
-      error: err.message || "Error desconocido.",
-    });
+    res.status(500).json({ success: false, error: err.message });
   }
 }
