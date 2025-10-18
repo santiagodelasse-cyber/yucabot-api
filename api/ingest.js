@@ -6,6 +6,7 @@ import PDFParser from "pdf2json";
 
 export const config = { api: { bodyParser: false } };
 
+// --- Inicializar Supabase ---
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -28,10 +29,10 @@ async function extractTextFromPDF(filePath) {
 
 // --- Generar embedding usando Hugging Face ---
 async function generateEmbedding(text) {
-  const HF_API_KEY = process.env.HUGGINGFACE_API_KEY;
-  if (!HF_API_KEY) throw new Error("HF_API_KEY no está configurada");
+  const HF_API_KEY = process.env.HUGGINGFACE_API_KEY; // ✅ nombre correcto
+  if (!HF_API_KEY) throw new Error("HUGGINGFACE_API_KEY no está configurada");
 
-  const model = "mixedbread-ai/mxbai-embed-large-v1"; // ✅ modelo correcto de embeddings
+  const model = "mixedbread-ai/mxbai-embed-large-v1";
 
   const response = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
     method: "POST",
@@ -52,7 +53,7 @@ async function generateEmbedding(text) {
 
   const data = await response.json();
 
-  // Si el modelo devuelve matriz, promediamos los vectores
+  // Si el modelo devuelve una matriz, promediamos los vectores
   if (Array.isArray(data) && Array.isArray(data[0])) {
     const len = data[0].length;
     const avg = new Array(len).fill(0);
@@ -65,7 +66,8 @@ async function generateEmbedding(text) {
 
 // --- Handler principal ---
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+  if (req.method !== "POST")
+    return res.status(405).json({ success: false, message: "Método no permitido." });
 
   console.log("📩 Ingest request received");
 
@@ -73,7 +75,11 @@ export default async function handler(req, res) {
   const [fields, files] = await form.parse(req);
   const file = files.file?.[0];
 
-  if (!file) return res.status(400).json({ error: "No file uploaded" });
+  if (!file)
+    return res.status(400).json({
+      success: false,
+      message: "No se subió ningún archivo.",
+    });
 
   const filePath = file.filepath;
   const fileType = file.mimetype;
@@ -83,6 +89,7 @@ export default async function handler(req, res) {
   let textContent = "";
 
   try {
+    // --- Identificar tipo de archivo ---
     if (fileType === "application/pdf") {
       textContent = await extractTextFromPDF(filePath);
     } else if (
@@ -95,7 +102,7 @@ export default async function handler(req, res) {
     } else if (fileType === "text/plain") {
       textContent = fs.readFileSync(filePath, "utf8");
     } else {
-      throw new Error(`Unsupported file type: ${fileType}`);
+      throw new Error(`Tipo de archivo no compatible: ${fileType}`);
     }
 
     if (!textContent.trim()) throw new Error("El archivo está vacío o no se pudo leer.");
@@ -115,10 +122,20 @@ export default async function handler(req, res) {
     if (error) throw error;
 
     console.log("✅ Documento procesado correctamente");
-    return res.status(200).json({ success: true });
+
+    // --- 🔥 Respuesta compatible con Lovable UI ---
+    return res.status(200).json({
+      success: true,
+      message: `✅ Documento "${fileName}" procesado y guardado correctamente en la base de conocimiento.`,
+      status: "ok",
+    });
   } catch (error) {
     console.error("💥 Fatal ingest error:", error);
-    return res.status(500).json({ error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: "Ocurrió un error al procesar el documento.",
+      error: error.message,
+    });
   } finally {
     try {
       fs.unlinkSync(filePath);
