@@ -1,178 +1,166 @@
 import { createClient } from "@supabase/supabase-js";
 
-const HF_API_KEY = process.env.HUGGINGFACE_API_KEY;
-
+// === CONFIGURACIÓN ===
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// === Embeddings (HF: mxbai-embed-large-v1) ===============================
-async function generateEmbedding(text) {
-  const response = await fetch(
-    "https://api-inference.huggingface.co/models/mixedbread-ai/mxbai-embed-large-v1",
-    {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${HF_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ inputs: text }),
-    }
-  );
+const HF_API_KEY = process.env.HUGGINGFACE_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error("Error al generar embedding: " + err);
-  }
-
-  const result = await response.json();
-
-  // Formato flexible para distintas respuestas del endpoint
-  let embedding = null;
-  if (Array.isArray(result)) {
-    if (result[0]?.embedding && Array.isArray(result[0].embedding)) {
-      embedding = result[0].embedding;
-    } else if (Array.isArray(result[0])) {
-      embedding = result[0];
-    } else if (typeof result[0] === "number") {
-      embedding = result;
-    }
-  } else if (Array.isArray(result?.embedding)) {
-    embedding = result.embedding;
-  }
-
-  if (!embedding || !Array.isArray(embedding)) {
-    console.error("❌ Resultado inesperado de Hugging Face (embeddings):", result);
-    throw new Error("No se pudo extraer un embedding válido del resultado de Hugging Face.");
-  }
-
-  console.log(`✅ Embedding generado con ${embedding.length} dimensiones.`);
-  return embedding;
+// === CORS UNIVERSAL ===
+function setCORS(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-// === Texto generativo (HF) con fallback ===================================
-async function hfGenerate(model, prompt) {
-  const resp = await fetch(
-    `https://api-inference.huggingface.co/models/${model}`,
-    {
+// === FUNCIÓN: Generar embedding ===
+async function generateEmbedding(text) {
+  if (!text || text.trim() === "") throw new Error("Texto vacío para embedding.");
+
+  // Preferencia Hugging Face
+  if (HF_API_KEY) {
+    const model = "mixedbread-ai/mxbai-embed-large-v1";
+    const response = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${HF_API_KEY}`,
+        Authorization: `Bearer ${HF_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        inputs: text.slice(0, 8000),
+        options: { wait_for_model: true },
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`Error HuggingFace (${response.status}): ${err}`);
+    }
+
+    const data = await response.json();
+    if (Array.isArray(data) && Array.isArray(data[0])) return data[0];
+    if (Array.isArray(data)) return data;
+    throw new Error("Respuesta inválida de HuggingFace.");
+  }
+
+  // Fallback OpenAI
+  if (OPENAI_API_KEY) {
+    const response = await fetch("https://api.openai.com/v1/embeddings", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "text-embedding-3-small",
+        input: text.slice(0, 8000),
+      }),
+    });
+    const data = await response.json();
+    return data.data[0].embedding;
+  }
+
+  throw new Error("No se encontró API Key de embeddings (HF o OpenAI).");
+}
+
+// === FUNCIÓN: Generar respuesta generativa ===
+async function generateAnswer(context, question) {
+  const prompt = `
+Eres YucaBot, un asistente virtual especializado en estudios fitness, yoga, pilates y bienestar.
+Usa la siguiente información de contexto (extraída de documentos del cliente) para responder de forma natural, concisa y útil.
+
+Contexto:
+${context}
+
+Pregunta del usuario:
+${question}
+
+Responde en español, con tono cálido y profesional.
+`;
+
+  if (OPENAI_API_KEY) {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.7,
+      }),
+    });
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content || "No se encontró respuesta.";
+  }
+
+  // Fallback Hugging Face (modelo de texto generativo)
+  if (HF_API_KEY) {
+    const model = "mistralai/Mixtral-8x7B-Instruct-v0.1";
+    const response = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${HF_API_KEY}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
         inputs: prompt,
-        parameters: {
-          max_new_tokens: 280,
-          temperature: 0.6,
-          do_sample: true
-        }
+        parameters: { max_new_tokens: 300, temperature: 0.7 },
       }),
-    }
-  );
-
-  if (!resp.ok) {
-    const errTxt = await resp.text();
-    throw new Error(`HF ${model} error: ${errTxt}`);
+    });
+    const data = await response.json();
+    return data[0]?.generated_text?.split("Respuesta:")[1]?.trim() || "No encontré respuesta.";
   }
 
-  const data = await resp.json();
-  // HuggingFace suele devolver [{ generated_text: "..." }]
-  const text = Array.isArray(data) ? (data[0]?.generated_text || "") : (data.generated_text || "");
-  if (!text) throw new Error(`HF ${model} devolvió sin texto utilizable`);
-  return text;
+  throw new Error("No se encontró API Key para generación de texto.");
 }
 
-async function generateAnswer(context, question) {
-  // Prompt claro y breve en español
-  const prompt = `
-Eres YucaBot, asistente para estudios fitness (Pilates, Yoga, Barre, Functional Training) en Mérida.
-Responde en español, de forma breve y clara, SOLO usando el CONTEXTO.
-Si no está en el contexto, responde literalmente: "No encontré esa información en los documentos."
-
-CONTEXTO:
-${context}
-
-PREGUNTA:
-${question}
-
-RESPUESTA:
-`.trim();
-
-  // Modelo principal (gratis y estable)
-  const primary = "HuggingFaceH4/zephyr-7b-beta";
-  // Fallbacks razonables gratuitos
-  const fallbacks = [
-    "mistralai/Mistral-7B-Instruct-v0.2",
-    "tiiuae/falcon-7b-instruct"
-  ];
-
-  // Intenta el principal
-  try {
-    const out = await hfGenerate(primary, prompt);
-    return out;
-  } catch (e1) {
-    console.warn("⚠️ Primary model failed:", e1.message);
-  }
-
-  // Intenta fallbacks en orden
-  for (const m of fallbacks) {
-    try {
-      const out = await hfGenerate(m, prompt);
-      return out;
-    } catch (e) {
-      console.warn(`⚠️ Fallback ${m} failed:`, e.message);
-    }
-  }
-
-  // Último recurso: respuesta extractiva mínima desde el contexto
-  const fallbackPlain =
-    "No encontré esa información en los documentos.\n\n" +
-    "Fragmentos relevantes:\n" +
-    context.slice(0, 600);
-  return fallbackPlain;
-}
-
-// === Endpoint principal ====================================================
+// === HANDLER PRINCIPAL ===
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Método no permitido" });
-  }
+  setCORS(res);
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Método no permitido" });
+
+  console.log("🧠 Nueva consulta recibida");
 
   try {
-    const body = await (req.json ? req.json() : req.body);
-    const query = body?.query;
+    const { query } = req.body;
+    if (!query || query.trim() === "") throw new Error("Consulta vacía.");
 
-    if (!query) {
-      return res.status(400).json({ error: "Falta la propiedad 'query' en el cuerpo de la solicitud." });
-    }
-
-    console.log("🧠 Generando embedding para la consulta...");
+    console.log("🔹 Generando embedding...");
     const queryEmbedding = await generateEmbedding(query);
 
-    console.log("🔍 Buscando coincidencias en Supabase...");
-    const { data, error } = await supabase.rpc("match_documents", {
+    console.log("🔹 Buscando coincidencias en Supabase...");
+    const { data: matches, error } = await supabase.rpc("match_documents", {
       query_embedding: queryEmbedding,
-      match_threshold: 0.75,
-      match_count: 3,
+      match_threshold: 0.78,
+      match_count: 5,
     });
 
     if (error) throw error;
 
-    const context = (data || []).map((d) => d.content).join("\n\n");
+    const contextText = matches
+      ?.map((m) => m.content)
+      .join("\n\n")
+      .slice(0, 4000);
 
-    console.log("🤖 Generando respuesta con Hugging Face (con fallback)...");
-    const answer = await generateAnswer(context || "No hay contexto disponible.", query);
+    console.log("🔹 Generando respuesta con IA...");
+    const answer = await generateAnswer(contextText, query);
 
-    console.log("✅ Respuesta generada correctamente");
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       answer,
-      sources: data || [],
+      sources: matches?.map((m) => m.id) || [],
     });
-  } catch (error) {
-    console.error("💥 Error al procesar la consulta:", error);
-    return res.status(500).json({ error: error.message });
+  } catch (err) {
+    console.error("💥 Error en query:", err);
+    res.status(500).json({
+      success: false,
+      error: err.message || "Error desconocido.",
+    });
   }
 }
