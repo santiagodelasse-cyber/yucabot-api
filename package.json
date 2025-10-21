@@ -1,22 +1,29 @@
 {
   "name": "yucabot-api",
-  "version": "1.0.0",
   "private": true,
+  "version": "1.0.0",
+  "description": "Backend API for YucaBot",
   "type": "module",
   "scripts": {
     "dev": "vercel dev",
+    "build": "echo \"Skipping build for API-only project\"",
     "start": "vercel dev",
-    "build": "echo 'Skipping build for API-only project'"
+    "lint": "eslint ."
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.39.1",
+    "@supabase/supabase-js": "^2.75.0",
     "formidable": "^3.5.1",
     "fs": "^0.0.1-security",
-    "pdf-parse": "^1.1.1",
+    "mammoth": "^1.7.2",
+    "pdf2json": "^3.1.5",
     "tslib": "^2.6.2",
     "node-fetch": "^3.3.2"
   },
+  "devDependencies": {
+    "eslint": "^9.32.0"
+  },
   "engines": {
-    "node": ">=18.0.0"
-  }
+    "node": "20.x"
+  },
+  "packageManager": "npm@10.9.0"
 }
