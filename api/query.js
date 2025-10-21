@@ -1,78 +1,169 @@
+// api/query.js
 import { createClient } from "@supabase/supabase-js";
-import OpenAI from "openai";
 
+// === CORS & Helpers ===
+function setCORS(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+}
+function ok(res, data) {
+  setCORS(res);
+  return res.status(200).json(data);
+}
+function err(res, message = "Internal server error") {
+  setCORS(res);
+  console.error("❌", message);
+  return res.status(500).json({ success: false, error: message });
+}
+
+// === Configuración Supabase ===
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// === Generar embedding en Hugging Face ===
+async function generateEmbedding(queryText) {
+  const HF_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_API_KEY;
+  if (!HF_API_KEY) throw new Error("HF_API_KEY no está configurada");
 
-export default async function handler(req, res) {
-  if (req.method !== "POST")
-    return res.status(405).json({ error: "Method not allowed" });
+  const model = "mixedbread-ai/mxbai-embed-large-v1";
+  const input = queryText.slice(0, 8000);
 
+  const doFetch = async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    try {
+      const response = await fetch(
+        `https://api-inference.huggingface.co/models/${model}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${HF_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            inputs: input,
+            options: { wait_for_model: true },
+          }),
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(timeout);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Hugging Face error ${response.status}: ${text}`);
+      }
+      return response.json();
+    } catch (e) {
+      clearTimeout(timeout);
+      throw e;
+    }
+  };
+
+  let data;
   try {
-    const { query, sessionId } = req.body;
+    data = await doFetch();
+  } catch (_) {
+    data = await doFetch();
+  }
 
-    console.log("🧠 Generando embedding...");
-    const embeddingResponse = await openai.embeddings.create({
-      model: "text-embedding-3-small",
-      input: query,
+  if (Array.isArray(data) && Array.isArray(data[0])) {
+    const len = data[0].length;
+    const acc = new Array(len).fill(0);
+    for (const vec of data) for (let i = 0; i < len; i++) acc[i] += vec[i];
+    const avg = acc.map((v) => v / data.length);
+    return avg;
+  }
+
+  if (!Array.isArray(data)) throw new Error("Respuesta de HF inesperada.");
+  return data;
+}
+
+// === Handler Principal ===
+export default async function handler(req, res) {
+  if (req.method === "OPTIONS") {
+    setCORS(res);
+    return res.status(200).end();
+  }
+
+  if (req.method !== "POST") {
+    setCORS(res);
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const { query } = req.body || {};
+  if (!query || typeof query !== "string") {
+    return err(res, "No se proporcionó una consulta válida.");
+  }
+
+  console.log(`🧠 Recibida query: "${query}"`);
+  try {
+    // 1️⃣ Generar embedding para la consulta
+    const embedding = await generateEmbedding(query);
+    if (!embedding) throw new Error("No se generó embedding válido");
+
+    // 2️⃣ Buscar coincidencias semánticas en Supabase
+    const { data: matches, error } = await supabase.rpc("match_documents", {
+      query_embedding: embedding,
+      match_threshold: 0.75, // ajustar según necesidad
+      match_count: 5,
     });
 
-    const embedding = embeddingResponse.data[0].embedding;
-    console.log("✅ Embedding generado:", embedding.length, "dimensiones");
+    if (error) throw error;
 
-    console.log("🔍 Buscando coincidencias en Supabase...");
-    const { data: matches, error: matchError } = await supabase.rpc(
-      "match_documents",
-      {
-        query_embedding: embedding,
-        match_threshold: 0.7,
-        match_count: 4,
-      }
-    );
+    if (!matches || matches.length === 0) {
+      console.warn("⚠️ No se encontraron coincidencias relevantes.");
+      return ok(res, {
+        success: true,
+        answer: "No encontré esa información en los documentos.",
+        sources: [],
+      });
+    }
 
-    if (matchError) throw matchError;
-
+    // 3️⃣ Unir el contexto más relevante
     const contextText = matches
       .map((m) => m.content)
-      .join("\n\n")
-      .slice(0, 5000);
+      .slice(0, 3)
+      .join("\n\n");
 
-    console.log("🤖 Generando respuesta contextual...");
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `Eres YucaBot, un asistente de inteligencia artificial especializado en estudios de fitness, bienestar y gestión de clientes. 
-          Responde de forma clara, empática y profesional, en español latinoamericano.`,
-        },
-        {
-          role: "user",
-          content: `Basado en esta información contextual:\n${contextText}\n\nPregunta del usuario: ${query}`,
-        },
-      ],
-      temperature: 0.4,
+    // 4️⃣ Generar una respuesta resumida estilo ChatGPT (opcional)
+    const summaryPrompt = `Eres un asistente profesional de fitness y bienestar. 
+Responde brevemente a la siguiente pregunta usando solo el contexto provisto.
+Pregunta: "${query}"
+Contexto:\n${contextText}\n
+Respuesta:`;
+
+    const HF_API_KEY = process.env.HUGGINGFACE_API_KEY || process.env.HF_API_KEY;
+    const resp = await fetch("https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${HF_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ inputs: summaryPrompt, parameters: { max_new_tokens: 200 } }),
     });
 
-    const answer = completion.choices[0].message.content;
+    let answerText = "Lo siento, no pude generar una respuesta en este momento.";
+    if (resp.ok) {
+      const result = await resp.json();
+      answerText = Array.isArray(result)
+        ? result[0]?.generated_text?.replace(summaryPrompt, "").trim()
+        : result.generated_text?.trim() || answerText;
+    }
 
-    // Guardar en Supabase (historial de sesión)
-    await supabase.from("chat_memory").insert({
-      session_id: sessionId || "default",
-      question: query,
-      answer,
-      created_at: new Date(),
+    // 5️⃣ Respuesta final
+    return ok(res, {
+      success: true,
+      answer: answerText || "No encontré información suficiente para responder.",
+      sources: matches.map((m) => ({
+        id: m.id,
+        similarity: m.similarity,
+      })),
     });
-
-    return res.status(200).json({ success: true, answer, sources: matches });
-  } catch (error) {
-    console.error("💥 Error al procesar la consulta:", error);
-    return res.status(500).json({ success: false, error: error.message });
+  } catch (e) {
+    console.error("💥 Fatal query error:", e);
+    return err(res, e.message);
   }
 }
