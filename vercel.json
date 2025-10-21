@@ -5,6 +5,8 @@
       "runtime": "nodejs22.x"
     }
   },
+  "buildCommand": "npm install --legacy-peer-deps",
+  "installCommand": "npm install --legacy-peer-deps",
   "builds": [
     { "src": "api/**/*.js", "use": "@vercel/node" }
   ],
