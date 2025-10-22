@@ -1,18 +1,11 @@
 // api/test.js
-import http from "http";
-
-const PORT = 3000;
-
-const server = http.createServer((req, res) => {
-  if (req.url === "/api/test") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ ok: true, message: "🚀 YucaBot API running locally!" }));
+export default async function handler(req, res) {
+  if (req.method === "GET") {
+    return res.status(200).json({
+      ok: true,
+      message: "🚀 YucaBot API working correctly from Vercel!"
+    });
   } else {
-    res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "Not Found" }));
+    return res.status(405).json({ error: "Method not allowed" });
   }
-});
-
-server.listen(PORT, () => {
-  console.log(`✅ Server running at http://localhost:${PORT}/api/test`);
-});
+}
