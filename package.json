@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "Backend API for YucaBot (Supabase + Vercel + Hugging Face/OpenAI)",
   "main": "api/test.js",
-  "type": "module",
 "scripts": {
   "dev": "node --watch api/test.js",
   "local": "vercel dev",
