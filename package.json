@@ -1,29 +1,39 @@
 {
   "name": "yucabot-api",
-  "private": true,
   "version": "1.0.0",
-  "description": "Backend API for YucaBot",
+  "description": "Backend API for YucaBot (Supabase + Vercel + Hugging Face/OpenAI)",
+  "main": "api/test.js",
   "type": "module",
   "scripts": {
-    "dev": "vercel dev",
-    "build": "echo \"Skipping build for API-only project\"",
-    "start": "vercel dev",
+    "dev": "node --watch api/test.js",
+    "local": "vercel dev",
+    "build": "vercel build",
+    "start": "vercel start",
     "lint": "eslint ."
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.75.0",
+    "@supabase/supabase-js": "^2.42.7",
     "formidable": "^3.5.1",
-    "fs": "^0.0.1-security",
-    "mammoth": "^1.7.2",
-    "pdf2json": "^3.1.5",
-    "tslib": "^2.6.2",
+    "pdf2json": "^3.0.3",
+    "mammoth": "^1.6.0",
+    "openai": "^4.13.0",
     "node-fetch": "^3.3.2"
   },
   "devDependencies": {
-    "eslint": "^9.32.0"
+    "eslint": "^9.5.0"
   },
   "engines": {
-    "node": "20.x"
+    "node": ">=20.0.0"
   },
-  "packageManager": "npm@10.9.0"
+  "keywords": [
+    "yucabot",
+    "ai",
+    "supabase",
+    "vercel",
+    "openai",
+    "backend",
+    "automation"
+  ],
+  "author": "Santiago Jiménez de Lasse",
+  "license": "MIT"
 }
