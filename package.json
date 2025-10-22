@@ -4,13 +4,12 @@
   "description": "Backend API for YucaBot (Supabase + Vercel + Hugging Face/OpenAI)",
   "main": "api/test.js",
   "type": "module",
-  "scripts": {
-    "dev": "node --watch api/test.js",
-    "local": "vercel dev",
-    "build": "vercel build",
-    "start": "vercel start",
-    "lint": "eslint ."
-  },
+"scripts": {
+  "dev": "node --watch api/test.js",
+  "local": "vercel dev",
+  "build": "vercel build",
+  "start": "node api/test.js"
+},
   "dependencies": {
     "@supabase/supabase-js": "^2.42.7",
     "formidable": "^3.5.1",
