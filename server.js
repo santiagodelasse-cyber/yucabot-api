@@ -1,4 +1,4 @@
-// server.js (versión ES Modules)
+// server.js — versión compatible con ES Modules
 import express from "express";
 
 const app = express();
