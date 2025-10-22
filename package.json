@@ -2,37 +2,12 @@
   "name": "yucabot-api",
   "version": "1.0.0",
   "description": "Backend API for YucaBot (Supabase + Vercel + OpenAI)",
-  "main": "server.js",
+  "main": "server.cjs",
   "scripts": {
-    "dev": "node server.js",
-    "local": "vercel dev",
-    "build": "vercel build",
-    "start": "node server.js"
+    "dev": "node server.cjs",
+    "start": "node server.cjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.42.7",
-    "express": "^4.19.2",
-    "formidable": "^3.5.1",
-    "pdf2json": "^3.0.3",
-    "mammoth": "^1.6.0",
-    "openai": "^4.13.0",
-    "node-fetch": "^3.3.2"
-  },
-  "devDependencies": {
-    "eslint": "^9.5.0"
-  },
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "keywords": [
-    "yucabot",
-    "ai",
-    "supabase",
-    "vercel",
-    "openai",
-    "backend",
-    "automation"
-  ],
-  "author": "Santiago Jiménez de Lasse",
-  "license": "MIT"
+    "express": "^4.19.2"
+  }
 }
