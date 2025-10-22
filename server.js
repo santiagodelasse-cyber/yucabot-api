@@ -1,11 +1,11 @@
 // server.js
-import express from "express";
+const express = require("express");
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.get("/api/test", (req, res) => {
-  res.json({ ok: true, message: "🚀 YucaBot API running locally via Express!" });
+  res.json({ ok: true, message: "🚀 YucaBot API running locally via Express (CommonJS)" });
 });
 
 app.listen(PORT, () => {
