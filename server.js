@@ -1,4 +1,4 @@
-// server.js — versión compatible con ES Modules
+// ✅ server.js — versión compatible con ES Modules
 import express from "express";
 
 const app = express();
@@ -6,7 +6,10 @@ const PORT = process.env.PORT || 3000;
 
 // Ruta de prueba
 app.get("/api/test", (req, res) => {
-  res.json({ ok: true, message: "🚀 YucaBot API running locally via Express (ESM)" });
+  res.json({
+    ok: true,
+    message: "🚀 YucaBot API running locally via Express (ESM fixed)"
+  });
 });
 
 // Inicia servidor
