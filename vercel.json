@@ -2,13 +2,12 @@
   "version": 2,
   "functions": {
     "api/**/*.js": {
-      "runtime": "nodejs20.x"
+      "runtime": "node20.x"
     }
   },
-  "builds": [],
   "routes": [
     {
-      "src": "/(.*)",
+      "src": "/api/(.*)",
       "dest": "/api/$1"
     }
   ]
