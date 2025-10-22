@@ -1,7 +1,7 @@
 {
   "name": "yucabot-api",
   "version": "1.0.0",
-  "description": "Backend API for YucaBot (Supabase + Vercel + OpenAI)",
+  "description": "Backend API for YucaBot (Vercel + Supabase + OpenAI)",
   "main": "server.cjs",
   "scripts": {
     "dev": "node server.cjs",
@@ -9,5 +9,8 @@
   },
   "dependencies": {
     "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }
