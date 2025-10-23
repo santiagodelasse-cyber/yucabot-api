@@ -1,14 +1,9 @@
 {
   "version": 2,
   "functions": {
-    "api/**/*.js": {
-      // eliminación del campo runtime
-    }
+    "api/**/*.js": {}
   },
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
-    }
+    { "src": "/api/(.*)", "dest": "/api/$1" }
   ]
 }

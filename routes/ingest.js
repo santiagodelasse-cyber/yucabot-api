@@ -1,0 +1,9 @@
+const express = require("express");
+
+const router = express.Router();
+
+router.post("/", async (req, res) => {
+  res.status(501).json({ error: "Ingest endpoint not implemented yet" });
+});
+
+module.exports = router;
